@@ -7,6 +7,10 @@ if (!redisUrl) {
 }
 
 export const JOB_QUEUE_KEY = "job-queue";
+// Sorted set of job IDs waiting out a retry backoff, scored by the epoch-ms
+// timestamp at which they become eligible to run again.
+export const DELAYED_QUEUE_KEY = "job-delayed";
+export const DEAD_LETTER_KEY = "job-dead-letter";
 
 // Shared connection for simple, non-blocking commands (e.g. enqueueing).
 export const redis = new Redis(redisUrl);
@@ -40,4 +44,42 @@ export async function blockingDequeueJob(
 
   const [, jobId] = result;
   return jobId;
+}
+
+export async function scheduleRetry(
+  jobId: string,
+  delayMs: number
+): Promise<void> {
+  await redis.zadd(DELAYED_QUEUE_KEY, Date.now() + delayMs, jobId);
+}
+
+export async function moveToDeadLetter(jobId: string): Promise<void> {
+  await redis.rpush(DEAD_LETTER_KEY, jobId);
+}
+
+// Runs atomically inside Redis so that concurrent promoters (e.g. several
+// worker processes) can never move the same job onto the queue twice.
+const PROMOTE_DUE_JOBS_SCRIPT = `
+local due = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", ARGV[1], "LIMIT", 0, ARGV[2])
+for _, jobId in ipairs(due) do
+  redis.call("ZREM", KEYS[1], jobId)
+  redis.call("RPUSH", KEYS[2], jobId)
+end
+return #due
+`;
+
+/**
+ * Moves delayed jobs whose backoff has elapsed back onto the main queue.
+ * Resolves with the number of jobs promoted.
+ */
+export async function promoteDueJobs(batchSize = 100): Promise<number> {
+  const promoted = await redis.eval(
+    PROMOTE_DUE_JOBS_SCRIPT,
+    2,
+    DELAYED_QUEUE_KEY,
+    JOB_QUEUE_KEY,
+    Date.now(),
+    batchSize
+  );
+  return Number(promoted);
 }

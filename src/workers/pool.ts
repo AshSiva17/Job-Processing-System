@@ -1,7 +1,13 @@
 import { eq } from "drizzle-orm";
 import type Redis from "ioredis";
 import { db, jobs } from "../db";
-import { blockingDequeueJob, createRedisConnection } from "../queue";
+import {
+  blockingDequeueJob,
+  createRedisConnection,
+  moveToDeadLetter,
+  scheduleRetry,
+} from "../queue";
+import { retryDelayMs } from "./backoff";
 import { getHandler } from "./handlers";
 
 // How long each BRPOP call blocks before timing out and looping again.
@@ -72,11 +78,19 @@ export class Worker {
       return;
     }
 
-    this.log(`picked up job ${job.id} (type=${job.type})`);
+    if (job.status === "completed" || job.status === "dead") {
+      this.log(`job ${job.id} is already ${job.status}, skipping`);
+      return;
+    }
+
+    const attempts = job.attempts + 1;
+    this.log(
+      `picked up job ${job.id} (type=${job.type}, attempt ${attempts}/${job.maxAttempts})`
+    );
 
     await db
       .update(jobs)
-      .set({ status: "processing", attempts: job.attempts + 1 })
+      .set({ status: "processing", attempts })
       .where(eq(jobs.id, job.id));
 
     try {
@@ -90,15 +104,42 @@ export class Worker {
 
       this.log(`job ${job.id} completed`);
     } catch (error) {
-      const message = describeError(error);
+      await this.handleFailure(job.id, attempts, job.maxAttempts, error);
+    }
+  }
 
+  private async handleFailure(
+    jobId: string,
+    attempts: number,
+    maxAttempts: number,
+    error: unknown
+  ): Promise<void> {
+    const message = describeError(error);
+
+    if (attempts >= maxAttempts) {
       await db
         .update(jobs)
-        .set({ status: "failed", errorMessage: message })
-        .where(eq(jobs.id, job.id));
+        .set({ status: "dead", errorMessage: message })
+        .where(eq(jobs.id, jobId));
+      await moveToDeadLetter(jobId);
 
-      this.log(`job ${job.id} failed: ${message}`);
+      this.log(
+        `job ${jobId} failed on final attempt ${attempts}/${maxAttempts}, moved to dead-letter: ${message}`
+      );
+      return;
     }
+
+    const delayMs = retryDelayMs(attempts);
+
+    await db
+      .update(jobs)
+      .set({ status: "failed", errorMessage: message })
+      .where(eq(jobs.id, jobId));
+    await scheduleRetry(jobId, delayMs);
+
+    this.log(
+      `job ${jobId} failed on attempt ${attempts}/${maxAttempts}, retrying in ${delayMs}ms: ${message}`
+    );
   }
 
   private log(message: string): void {
