@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type Redis from "ioredis";
 import { db, jobs } from "../db";
 import {
@@ -9,6 +9,8 @@ import {
 } from "../queue";
 import { retryDelayMs } from "./backoff";
 import { getHandler } from "./handlers";
+import { startHeartbeat } from "./heartbeat";
+import { JOB_TIMEOUT_MS, runWithTimeout } from "./timeout";
 
 // How long each BRPOP call blocks before timing out and looping again.
 // A finite timeout (rather than 0/infinite) lets the worker notice
@@ -90,12 +92,23 @@ export class Worker {
 
     await db
       .update(jobs)
-      .set({ status: "processing", attempts })
+      .set({ status: "processing", attempts, updatedAt: sql`now()` })
       .where(eq(jobs.id, job.id));
+
+    const stopHeartbeat = startHeartbeat(job.id, (message) =>
+      this.log(message)
+    );
 
     try {
       const handler = getHandler(job.type);
-      await handler(job.payload as Record<string, unknown>);
+      try {
+        await runWithTimeout(
+          (signal) => handler(job.payload as Record<string, unknown>, signal),
+          JOB_TIMEOUT_MS
+        );
+      } finally {
+        await stopHeartbeat();
+      }
 
       await db
         .update(jobs)
