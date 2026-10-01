@@ -1,5 +1,6 @@
 import { and, eq, lt, sql } from "drizzle-orm";
 import { db, jobs } from "../db";
+import { publishJobEvent } from "../events";
 import { moveToDeadLetter, scheduleRetry } from "../queue";
 import { retryDelayMs } from "../workers/backoff";
 import { HEARTBEAT_INTERVAL_MS } from "../workers/heartbeat";
@@ -76,16 +77,12 @@ export class Reaper {
         errorMessage: STALE_ERROR_MESSAGE,
       })
       .where(and(eq(jobs.status, "processing"), lt(jobs.updatedAt, cutoff)))
-      .returning({
-        id: jobs.id,
-        status: jobs.status,
-        attempts: jobs.attempts,
-        maxAttempts: jobs.maxAttempts,
-      });
+      .returning();
 
     for (const job of reaped) {
       if (job.status === "dead") {
         await moveToDeadLetter(job.id);
+        await publishJobEvent("dead", job);
         console.log(
           `[reaper] job ${job.id} stuck on final attempt ${job.attempts}/${job.maxAttempts}, moved to dead-letter`
         );
@@ -94,6 +91,7 @@ export class Reaper {
 
       const delayMs = retryDelayMs(job.attempts);
       await scheduleRetry(job.id, delayMs);
+      await publishJobEvent("failed", job);
       console.log(
         `[reaper] job ${job.id} stuck on attempt ${job.attempts}/${job.maxAttempts}, retrying in ${delayMs}ms`
       );

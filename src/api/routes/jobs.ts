@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Router } from "express";
 import { db, jobs } from "../../db";
+import { publishJobEvent } from "../../events";
 import { enqueueJob } from "../../queue";
 import { createJobSchema, jobIdParamSchema } from "../schemas/job";
 import { formatJob } from "../utils/job";
@@ -30,6 +31,7 @@ jobsRouter.post("/", async (req, res) => {
     })
     .returning();
 
+  await publishJobEvent("created", job);
   await enqueueJob(job.id);
 
   res.status(201).json(formatJob(job));

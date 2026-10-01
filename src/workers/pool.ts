@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import type Redis from "ioredis";
 import { db, jobs } from "../db";
+import { publishJobEvent } from "../events";
 import {
   blockingDequeueJob,
   createRedisConnection,
@@ -90,10 +91,12 @@ export class Worker {
       `picked up job ${job.id} (type=${job.type}, attempt ${attempts}/${job.maxAttempts})`
     );
 
-    await db
+    const [processing] = await db
       .update(jobs)
       .set({ status: "processing", attempts, updatedAt: sql`now()` })
-      .where(eq(jobs.id, job.id));
+      .where(eq(jobs.id, job.id))
+      .returning();
+    await publishJobEvent("processing", processing);
 
     const stopHeartbeat = startHeartbeat(job.id, (message) =>
       this.log(message)
@@ -110,10 +113,12 @@ export class Worker {
         await stopHeartbeat();
       }
 
-      await db
+      const [completed] = await db
         .update(jobs)
         .set({ status: "completed", errorMessage: null })
-        .where(eq(jobs.id, job.id));
+        .where(eq(jobs.id, job.id))
+        .returning();
+      await publishJobEvent("completed", completed);
 
       this.log(`job ${job.id} completed`);
     } catch (error) {
@@ -130,11 +135,13 @@ export class Worker {
     const message = describeError(error);
 
     if (attempts >= maxAttempts) {
-      await db
+      const [dead] = await db
         .update(jobs)
         .set({ status: "dead", errorMessage: message })
-        .where(eq(jobs.id, jobId));
+        .where(eq(jobs.id, jobId))
+        .returning();
       await moveToDeadLetter(jobId);
+      await publishJobEvent("dead", dead);
 
       this.log(
         `job ${jobId} failed on final attempt ${attempts}/${maxAttempts}, moved to dead-letter: ${message}`
@@ -144,11 +151,13 @@ export class Worker {
 
     const delayMs = retryDelayMs(attempts);
 
-    await db
+    const [failed] = await db
       .update(jobs)
       .set({ status: "failed", errorMessage: message })
-      .where(eq(jobs.id, jobId));
+      .where(eq(jobs.id, jobId))
+      .returning();
     await scheduleRetry(jobId, delayMs);
+    await publishJobEvent("failed", failed);
 
     this.log(
       `job ${jobId} failed on attempt ${attempts}/${maxAttempts}, retrying in ${delayMs}ms: ${message}`
