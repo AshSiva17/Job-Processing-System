@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { Router } from "express";
 import { db, jobs } from "../../db";
 import { publishJobEvent } from "../../events";
@@ -35,6 +35,23 @@ jobsRouter.post("/", async (req, res) => {
   await enqueueJob(job.id);
 
   res.status(201).json(formatJob(job));
+});
+
+const MAX_LIST_LIMIT = 500;
+
+jobsRouter.get("/", async (req, res) => {
+  const parsed = Number(req.query.limit);
+  const limit = Number.isFinite(parsed)
+    ? Math.min(Math.max(1, Math.floor(parsed)), MAX_LIST_LIMIT)
+    : 100;
+
+  const rows = await db
+    .select()
+    .from(jobs)
+    .orderBy(desc(jobs.createdAt))
+    .limit(limit);
+
+  res.json({ jobs: rows.map(formatJob) });
 });
 
 jobsRouter.get("/:id", async (req, res) => {
