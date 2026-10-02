@@ -3,12 +3,13 @@ import { Router } from "express";
 import { db, jobs } from "../../db";
 import { publishJobEvent } from "../../events";
 import { enqueueJob } from "../../queue";
+import { rateLimitJobCreation } from "../middleware/rateLimit";
 import { createJobSchema, jobIdParamSchema } from "../schemas/job";
 import { formatJob } from "../utils/job";
 
 export const jobsRouter = Router();
 
-jobsRouter.post("/", async (req, res) => {
+jobsRouter.post("/", rateLimitJobCreation, async (req, res) => {
   const parsed = createJobSchema.safeParse(req.body);
 
   if (!parsed.success) {
