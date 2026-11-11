@@ -19,6 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
     container_name: job-processing-redis
     restart: unless-stopped
     ports:

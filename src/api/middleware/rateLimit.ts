@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
-import { redis } from "../../queue";
+import { log } from "../../logging";
+import { redis, QUEUE_NAMESPACE } from "../../queue";
 
 // Max requests a client can make in a burst, and the steady-state rate at
 // which spent tokens come back.
@@ -8,7 +9,7 @@ const CAPACITY = Number(process.env.RATE_LIMIT_BURST) || 20;
 const REFILL_PER_SEC = Number(process.env.RATE_LIMIT_REFILL_PER_SEC) || 2;
 const REFILL_PER_MS = REFILL_PER_SEC / 1000;
 
-const KEY_PREFIX = "rate-limit:create-job:";
+const KEY_PREFIX = `${QUEUE_NAMESPACE}rate-limit:create-job:`;
 
 // Runs atomically so concurrent requests (across API instances) can't both
 // spend the last token. Uses the Redis clock so API host clocks don't matter.
@@ -68,7 +69,7 @@ export async function rateLimitJobCreation(
   } catch (error) {
     // Fail open: a limiter outage shouldn't take job creation down with it.
     const reason = error instanceof Error ? error.message : String(error);
-    console.log(`[rate-limit] check failed, allowing request: ${reason}`);
+    log("rate_limit_unavailable", { error: reason }, "warn");
     next();
     return;
   }
@@ -83,6 +84,7 @@ export async function rateLimitJobCreation(
 
   const retryAfterSec = Math.ceil((1 - tokens) / REFILL_PER_SEC);
   res.set("Retry-After", String(retryAfterSec));
+  log("rate_limited", { client: clientId(req), retry_after_seconds: retryAfterSec });
   res.status(429).json({
     error: "Rate limit exceeded",
     retry_after_seconds: retryAfterSec,

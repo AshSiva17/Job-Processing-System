@@ -18,7 +18,12 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "dashboard:dev": "npm run dev --prefix dashboard",
-    "dashboard:build": "npm run build --prefix dashboard"
+    "dashboard:build": "npm run build --prefix dashboard",
+    "load:k6": "k6 run load/k6/submit-jobs.js",
+    "test:metrics": "npm run build && node --test tests/metrics.cjs",
+    "test": "npm run build && vitest run",
+    "test:watch": "vitest",
+    "load:local": "npm run build && node load/run-local.cjs"
   },
   "keywords": [],
   "license": "ISC",
@@ -37,6 +42,7 @@
     "@types/ws": "^8.18.2",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^5.1.0"
   }
 }

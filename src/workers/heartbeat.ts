@@ -15,6 +15,7 @@ export const HEARTBEAT_INTERVAL_MS =
  */
 export function startHeartbeat(
   jobId: string,
+  attempt: number,
   log: (message: string) => void
 ): () => Promise<void> {
   let beatInFlight: Promise<void> | null = null;
@@ -24,7 +25,7 @@ export function startHeartbeat(
       const touched = await db
         .update(jobs)
         .set({ updatedAt: sql`now()` })
-        .where(and(eq(jobs.id, jobId), eq(jobs.status, "processing")))
+        .where(and(eq(jobs.id, jobId), eq(jobs.status, "processing"), eq(jobs.attempts, attempt)))
         .returning({ id: jobs.id });
 
       if (touched.length === 0) {

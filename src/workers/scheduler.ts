@@ -1,4 +1,8 @@
-import { promoteDueJobs } from "../queue";
+import { promoteDueJobIds } from "../queue";
+import { db, jobs } from "../db";
+import { eq } from "drizzle-orm";
+import { publishJobEvent } from "../events";
+import { log } from "../logging";
 
 // Delayed jobs can't be waited on with a blocking pop (Redis has no blocking
 // "pop when score <= now"), so due retries are promoted on a short interval.
@@ -34,13 +38,15 @@ export class RetryScheduler {
 
   private async tick(): Promise<void> {
     try {
-      const promoted = await promoteDueJobs();
-      if (promoted > 0) {
-        console.log(`[scheduler] re-queued ${promoted} job(s) for retry`);
+      const ids = await promoteDueJobIds();
+      for (const id of ids) {
+        log("job_retry_enqueued", { job_id: id });
+        const job = await db.query.jobs.findFirst({ where: eq(jobs.id, id) });
+        await publishJobEvent("retry", job);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.log(`[scheduler] error promoting delayed jobs: ${message}`);
+      log("scheduler_error", { error: message }, "error");
     }
   }
 }

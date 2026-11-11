@@ -4,4 +4,5 @@ dashboard/dist/
 dist/
 .env
 *.log
+load/k6/summary.json
 .DS_Store

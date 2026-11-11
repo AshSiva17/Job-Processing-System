@@ -100,7 +100,7 @@ export function App() {
       socket.addEventListener("open", () => {
         setWsState(WebSocket.OPEN);
         setError(null);
-        void refreshStats();
+        void loadInitial().catch(() => setError("Unable to refresh jobs"));
       });
 
       socket.addEventListener("message", (event) => {
@@ -115,7 +115,7 @@ export function App() {
           next.set(payload.job.id, payload.job);
           return sortJobs([...next.values()]);
         });
-        void refreshStats();
+        void refreshStats().catch(() => setError("Unable to refresh counts"));
       });
 
       socket.addEventListener("close", () => {
@@ -139,7 +139,7 @@ export function App() {
       }
       socket?.close();
     };
-  }, [refreshStats]);
+  }, [refreshStats, loadInitial]);
 
   const connectionAttr = useMemo(() => {
     if (wsState === WebSocket.OPEN) {
@@ -170,6 +170,10 @@ export function App() {
         <div className="stat-card">
           <div className="stat-label">In progress</div>
           <div className="stat-value">{stats?.in_progress ?? "—"}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Completed</div>
+          <div className="stat-value">{stats?.completed ?? "—"}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Dead letter</div>

@@ -1,3 +1,4 @@
+import { log } from "../logging";
 import type { Server } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import { JOB_EVENTS_CHANNEL } from "../events";
@@ -22,7 +23,7 @@ export function attachJobEventsWebSocket(server: Server): () => Promise<void> {
     alive.set(socket, true);
     socket.on("pong", () => alive.set(socket, true));
     socket.on("error", (error) => {
-      console.log(`[ws] client error: ${error.message}`);
+      log("websocket_error", { error: error.message }, "warn");
     });
   });
 
@@ -54,7 +55,7 @@ export function attachJobEventsWebSocket(server: Server): () => Promise<void> {
 
   subscriber.subscribe(JOB_EVENTS_CHANNEL).catch((error) => {
     const reason = error instanceof Error ? error.message : String(error);
-    console.log(`[ws] failed to subscribe to ${JOB_EVENTS_CHANNEL}: ${reason}`);
+    log("websocket_subscription_failed", { error: reason }, "error");
   });
 
   return async () => {
@@ -62,7 +63,11 @@ export function attachJobEventsWebSocket(server: Server): () => Promise<void> {
     for (const socket of wss.clients) {
       socket.close(1001, "Server shutting down");
     }
+    const forceClose = setTimeout(() => {
+      for (const socket of wss.clients) socket.terminate();
+    }, 1000);
     await new Promise<void>((resolve) => wss.close(() => resolve()));
+    clearTimeout(forceClose);
     await subscriber.quit();
   };
 }

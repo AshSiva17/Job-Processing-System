@@ -1,4 +1,5 @@
 import { and, eq, lt, sql } from "drizzle-orm";
+import { log } from "../logging";
 import { db, jobs } from "../db";
 import { publishJobEvent } from "../events";
 import { moveToDeadLetter, scheduleRetry } from "../queue";
@@ -22,14 +23,10 @@ export class Reaper {
       return;
     }
 
-    console.log(
-      `[reaper] started (timeout=${PROCESSING_TIMEOUT_MS}ms, heartbeat=${HEARTBEAT_INTERVAL_MS}ms, interval=${REAPER_INTERVAL_MS}ms)`
-    );
+    log("reaper_started", { timeout_ms: PROCESSING_TIMEOUT_MS, heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS, interval_ms: REAPER_INTERVAL_MS });
 
     if (PROCESSING_TIMEOUT_MS < 2 * HEARTBEAT_INTERVAL_MS) {
-      console.log(
-        `[reaper] warning: PROCESSING_TIMEOUT_MS should be at least 2x HEARTBEAT_INTERVAL_MS, or a single late heartbeat will get a live job reaped`
-      );
+      log("reaper_timeout_too_short", { timeout_ms: PROCESSING_TIMEOUT_MS, heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS }, "warn");
     }
 
     void this.runSweep();
@@ -49,7 +46,7 @@ export class Reaper {
       this.sweepInFlight = this.sweep()
         .catch((error) => {
           const message = error instanceof Error ? error.message : String(error);
-          console.log(`[reaper] sweep failed: ${message}`);
+          log("reaper_error", { error: message }, "error");
         })
         .finally(() => {
           this.sweepInFlight = null;
@@ -64,7 +61,7 @@ export class Reaper {
    * already counted when the worker picked the job up, so a job that keeps
    * crashing its worker still runs out of attempts instead of looping forever.
    */
-  private async sweep(): Promise<void> {
+  async sweep(): Promise<void> {
     // Computed on the database clock to match the heartbeat writes.
     const cutoff = sql`now() - make_interval(secs => ${PROCESSING_TIMEOUT_MS / 1000})`;
 
@@ -83,18 +80,14 @@ export class Reaper {
       if (job.status === "dead") {
         await moveToDeadLetter(job.id);
         await publishJobEvent("dead", job);
-        console.log(
-          `[reaper] job ${job.id} stuck on final attempt ${job.attempts}/${job.maxAttempts}, moved to dead-letter`
-        );
+        log("job_reaped_dead", { job_id: job.id, attempt: job.attempts });
         continue;
       }
 
       const delayMs = retryDelayMs(job.attempts);
       await scheduleRetry(job.id, delayMs);
       await publishJobEvent("failed", job);
-      console.log(
-        `[reaper] job ${job.id} stuck on attempt ${job.attempts}/${job.maxAttempts}, retrying in ${delayMs}ms`
-      );
+      log("job_reaped_retry", { job_id: job.id, attempt: job.attempts, delay_ms: delayMs });
     }
   }
 }

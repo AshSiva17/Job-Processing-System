@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { log, errorMessage } from "../logging";
 import { Reaper } from "./reaper";
 
 const reaper = new Reaper();
@@ -11,9 +12,9 @@ async function shutdown(signal: string): Promise<void> {
   }
   shuttingDown = true;
 
-  console.log(`\nReceived ${signal}, shutting down reaper...`);
+  log("reaper_stopping", { signal });
   await reaper.stop();
-  console.log("Reaper stopped");
+  log("reaper_stopped");
   process.exit(0);
 }
 

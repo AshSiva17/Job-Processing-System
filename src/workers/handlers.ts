@@ -7,9 +7,12 @@ import { setTimeout as sleep } from "node:timers/promises";
 // `signal` is aborted when the job exceeds its execution timeout. Handlers
 // should pass it to cancellable APIs (fetch, timers, DB queries) or check
 // `signal.aborted` between steps so they stop doing work once timed out.
+export interface HandlerContext { attempt: number }
+
 export type JobHandler = (
   payload: Record<string, unknown>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  context: HandlerContext
 ) => Promise<void>;
 
 const MIN_DURATION_MS = 500;
@@ -36,10 +39,18 @@ async function mockHandler(
   }
 }
 
-// No type-specific handlers yet — every job type currently falls back to
-// the mock handler below.
-const handlers: Record<string, JobHandler> = {};
+// Deterministic handlers are useful for repeatable recovery/load tests.
+const handlers: Record<string, JobHandler> = {
+  "always-fail": async () => { throw new Error("Intentional test failure"); },
+  "fail-then-succeed": async (_payload, signal, { attempt }) => {
+    await sleep(20, undefined, { signal });
+    if (attempt === 1) throw new Error("Intentional first-attempt failure");
+  },
+  "test-success": async (_payload, signal) => {
+    await sleep(20, undefined, { signal });
+  },
+};
 
 export function getHandler(jobType: string): JobHandler {
-  return handlers[jobType] ?? mockHandler;
+  return Object.hasOwn(handlers, jobType) ? handlers[jobType] : mockHandler;
 }

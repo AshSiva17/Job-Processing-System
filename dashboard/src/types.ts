@@ -24,6 +24,7 @@ export interface JobEvent {
 }
 
 export interface Stats {
+  completed: number;
   queue_depth: number;
   in_progress: number;
   dead_letter: number;

@@ -1,0 +1,24 @@
+{
+  "measured_at": "2026-11-11T02:36:09.358Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpus": 8,
+  "node": "v22.16.0",
+  "worker_count": 16,
+  "handler": "test-success (20ms sleep)",
+  "rate_limit_burst": "20",
+  "rate_limit_refill_per_sec": "2",
+  "profile": "30-second ramp: 0 → 100 → 200 → 100 submissions/sec",
+  "accepted": 79,
+  "rate_limited": 3420,
+  "accepted_per_second": 2.6109766715183462,
+  "submit_p95_ms": 20.84395029999999,
+  "completion_p95_ms": 334.99999999999994,
+  "dropped_iterations": 0,
+  "completion_timeouts": 0,
+  "sql": {
+    "total": 79,
+    "completed": 79,
+    "unfinished": 0
+  }
+}

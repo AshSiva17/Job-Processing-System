@@ -1,12 +1,14 @@
 import { formatJob } from "../api/utils/job";
 import type { Job } from "../db";
-import { redis } from "../queue";
+import { log } from "../logging";
+import { redis, QUEUE_NAMESPACE } from "../queue";
 
 // Workers and the reaper run in separate processes from the API, so status
 // changes travel over Redis pub/sub to reach the WebSocket server.
-export const JOB_EVENTS_CHANNEL = "job-events";
+export const JOB_EVENTS_CHANNEL = `${QUEUE_NAMESPACE}job-events`;
 
 export type JobEventType =
+  | "retry"
   | "created"
   | "processing"
   | "completed"
@@ -41,6 +43,6 @@ export async function publishJobEvent(
     await redis.publish(JOB_EVENTS_CHANNEL, JSON.stringify(message));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    console.log(`[events] failed to publish ${event} for job ${job.id}: ${reason}`);
+    log("event_publish_failed", { job_id: job.id, transition: event, error: reason }, "error");
   }
 }
